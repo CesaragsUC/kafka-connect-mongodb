@@ -1,0 +1,400 @@
+version: '3.8'
+
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  broker01:
+    image: confluentinc/cp-kafka:latest
+    hostname: broker01
+    container_name: broker01
+    privileged: true
+    depends_on:
+      - zookeeper
+    ports:
+      - "9091:9091"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9091,INTERNAL://broker01:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOGS_DIR: /kafka/kafka-logs-1
+    volumes:
+       - ./volumes/kafka:/usr/share/kafka/kafka-logs-1
+
+  broker02:
+    image: confluentinc/cp-kafka:latest
+    hostname: broker02
+    container_name: broker02
+    privileged: true
+    depends_on:
+      - zookeeper
+    ports:
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9093,INTERNAL://broker02:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOGS_DIR: /kafka/kafka-logs-2
+    volumes:
+       - ./volumes/kafka:/usr/share/kafka/kafka-logs-2
+
+  broker03:
+    image: confluentinc/cp-kafka:latest
+    hostname: broker03
+    container_name: broker03
+    privileged: true
+    depends_on:
+      - zookeeper
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9094,INTERNAL://broker03:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOGS_DIR: /kafka/kafka-logs-3
+    volumes:
+       - ./volumes/kafka:/usr/share/kafka/kafka-logs-3
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:latest
+    hostname: schema-registry
+    container_name: schema-registry
+    privileged: true
+    depends_on:
+      - broker01
+      - broker02
+      - broker03
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: broker01:9092,broker02:9092,broker03:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
+  connect:
+    image: cnfldemos/cp-server-connect-datagen:0.6.4-7.6.0
+    hostname: connect
+    container_name: connect
+    privileged: true
+    depends_on:
+      - broker01
+      - broker02
+      - broker03
+      - schema-registry
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: broker01:9092,broker02:9092,broker03:9092
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: compose-connect-group
+      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000  
+      # significa que as chaves serão tratadas como strings
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: false
+      #significa que os valores das mensagens serão serializados/deserializados no formato JSON.
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: false
+      #indicando que as chaves internas serão tratadas como JSON
+      CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      #os valores internos serão tratados como JSON
+      CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_LOG4J_LOGGERS: org.apache.zookeeper=ERROR,org.I0Itec.zkclient=ERROR,org.reflections=ERROR
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components,/data/connect-jars,/usr/share/java/kafka-connect-jdbc/jars/
+    volumes:
+      - ./volumes/db-leach:/db-leach/
+      # volume abaixo caminho da pasta onde estao os conectores .jar para listar no conector no cofluentic center, instalacao manual.
+      - ./volumes/java/kafka-connect-jdbc:/usr/share/java/kafka-connect-jdbc/jars/
+    command:
+      - bash
+      - -c
+      - |
+        echo "Installing Connector"
+        confluent-hub install --no-prompt confluentinc/kafka-connect-elasticsearch:14.0.14
+        confluent-hub install --no-prompt f0xdx/kafka-connect-wrap-smt:0.2.0
+        confluent-hub install --no-prompt neo4j/kafka-connect-neo4j:1.0.9
+        confluent-hub install --no-prompt debezium/debezium-connector-mongodb:2.4.2
+        confluent-hub install --no-prompt mongodb/kafka-connect-mongodb:1.11.2
+        confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:10.7.6
+        confluent-hub install --no-prompt confluentinc/kafka-connect-rabbitmq-sink:1.7.9
+        confluent-hub install --no-prompt confluentinc/kafka-connect-rabbitmq:1.7.9
+        confluent-hub install --no-prompt jcustenborder/kafka-connect-redis:0.0.5
+        confluent-hub install --no-prompt redis/redis-kafka-connect:0.9.0
+        confluent-hub install --no-prompt debezium/debezium-connector-sqlserver:2.4.2
+        #
+        echo "Launching Kafka Connect worker"
+        /etc/confluent/docker/run &
+        #
+        sleep infinity
+
+
+  ksql-datagen:
+    image: confluentinc/ksqldb-examples:latest
+    hostname: ksql-datagen
+    container_name: ksql-datagen
+    depends_on:
+      - ksqldb-server
+      - broker01
+      - broker02
+      - broker03
+      - schema-registry
+      - connect
+    command: "bash -c 'echo Waiting for Kafka to be ready... && \
+                       cub kafka-ready -b broker01:9092 1 40 && \
+                       echo Waiting for Confluent Schema Registry to be ready... && \
+                       cub sr-ready schema-registry 8081 40 && \
+                       echo Waiting a few seconds for topic creation to finish... && \
+                       sleep 11 && \
+                       tail -f /dev/null'"
+    environment:
+      KSQL_CONFIG_DIR: "/etc/ksql"
+      STREAMS_BOOTSTRAP_SERVERS: broker01:9092,broker02:9092,broker03:9092
+      STREAMS_SCHEMA_REGISTRY_HOST: schema-registry
+      STREAMS_SCHEMA_REGISTRY_PORT: 8081
+      
+
+  ksqldb-server:
+    image: confluentinc/cp-ksqldb-server:latest
+    hostname: ksqldb-server
+    container_name: ksqldb-server
+    privileged: true
+    depends_on:
+      - broker01
+      - broker02
+      - broker03
+      - connect
+    ports:
+      - "8088:8088"
+    environment:
+      KSQL_CONFIG_DIR: "/etc/ksql"
+      KSQL_BOOTSTRAP_SERVERS: broker01:9092,broker02:9092,broker03:9092
+      KSQL_HOST_NAME: ksqldb-server
+      KSQL_LISTENERS: "http://0.0.0.0:8088"
+      KSQL_CACHE_MAX_BYTES_BUFFERING: 0
+      KSQL_KSQL_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      KSQL_PRODUCER_INTERCEPTOR_CLASSES: "io.confluent.monitoring.clients.interceptor.MonitoringProducerInterceptor"
+      KSQL_CONSUMER_INTERCEPTOR_CLASSES: "io.confluent.monitoring.clients.interceptor.MonitoringConsumerInterceptor"
+      KSQL_KSQL_CONNECT_URL: "http://connect:8083"
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_REPLICATION_FACTOR: 1
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: 'true'
+      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: 'true'
+  
+  ksqldb-cli:
+    image: confluentinc/ksqldb-cli:latest
+    container_name: ksqldb-cli
+    depends_on:
+      - ksqldb-server
+    entrypoint: /bin/sh
+    tty: true
+    
+  rest-proxy:
+    image: confluentinc/cp-kafka-rest:latest
+    depends_on:
+      - broker01
+      - broker02
+      - broker03
+      - schema-registry 
+    ports:
+      - 8082:8082
+    hostname: rest-proxy
+    container_name: rest-proxy
+    environment:
+      KAFKA_REST_HOST_NAME: rest-proxy
+      KAFKA_REST_BOOTSTRAP_SERVERS: broker01:9092,broker02:9092,broker03:9092
+      KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
+      KAFKA_REST_SCHEMA_REGISTRY_URL: 'http://schema-registry:8081'
+      
+      
+      
+  control-center:
+    image: confluentinc/cp-enterprise-control-center:latest
+    hostname: control-center
+    container_name: control-center
+    depends_on:
+      - broker01
+      - broker02
+      - broker03
+      - schema-registry
+      - connect
+      - ksqldb-server
+    ports:
+      - "9021:9021"
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: broker01:9092,broker02:9092,broker03:9092
+      CONTROL_CENTER_CONNECT_CONNECT-DEFAULT_CLUSTER: 'connect:8083'
+      CONTROL_CENTER_CONNECT_HEALTHCHECK_ENDPOINT: '/connectors'
+      CONTROL_CENTER_KSQL_KSQLDB1_URL: "http://ksqldb-server:8088"
+      CONTROL_CENTER_KSQL_KSQLDB1_ADVERTISED_URL: "http://localhost:8088"
+      CONTROL_CENTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
+      CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
+      CONFLUENT_METRICS_TOPIC_REPLICATION: 1
+      PORT: 9021
+  
+  #https://github.com/bitnami/containers/tree/main/bitnami/mongodb  
+  mongodb:
+    image: docker.io/bitnami/mongodb:latest
+    container_name: mongodb
+    restart: always
+    ports:
+     - "27017:27017"
+    environment:
+       MONGODB_ADVERTISED_HOSTNAME: mongodb
+       MONGODB_REPLICA_SET_MODE: primary
+       MONGODB_ROOT_PASSWORD: cesar
+       MONGODB_ROOT_USER: cesar
+       MONGODB_REPLICA_SET_KEY: replicasetkey123
+    volumes:
+      - ./volumes/mongodb_master_data:/bitnami/mongodb
+      
+      
+  rabbitmq-api:
+        image: rabbitmq:3-management
+        container_name: rabbitmq
+        environment:
+            RABBITMQ_DEFAULT_USER: "guest"
+            RABBITMQ_DEFAULT_PASS: "guest"
+        ports:
+            - "5672:5672"
+            - "15672:15672"
+            
+
+  sql-server:
+        image: mcr.microsoft.com/mssql/server:2019-latest
+        container_name: sql-server-db
+        build: 
+            dockerfile: Dockerfile
+        environment:
+            SA_PASSWORD: "7f57544f-99fc-4ad4-a64d-932b1b9208c0"
+            ACCEPT_EULA: "Y"     
+        ports:
+            - "1433:1433"
+        volumes:
+            - ./volumes/sqqldata/mssql:/scripts/    
+            
+  redis:
+    image: redis:latest
+    container_name: redis-db
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./volumes/redis.data:/usr/share/root/redis
+      - ./volumes/redis.conf:/usr/share/redis/redis.conf
+    environment:
+      - REDIS_PASSWORD=Teste@123
+      - REDIS_PORT=6379
+      - REDIS_DATABASES=16   
+      
+      
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui
+    restart: always
+    depends_on:
+      - broker01
+      - broker02
+      - broker03
+      - zookeeper
+    ports:
+      - 8080:8080
+    environment:
+       DYNAMIC_CONFIG_ENABLED: true
+       KAFKA_CLUSTERS_0_NAME: broker-1
+       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: broker01:9092
+       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+       KAFKA_CLUSTERS_1_NAME: broker-2
+       KAFKA_CLUSTERS_1_BOOTSTRAPSERVERS: broker02:9092
+       KAFKA_CLUSTERS_1_ZOOKEEPER: zookeeper:2181
+       KAFKA_CLUSTERS_2_NAME: broker-3
+       KAFKA_CLUSTERS_2_BOOTSTRAPSERVERS: broker03:9092
+       KAFKA_CLUSTERS_2_ZOOKEEPER: zookeeper:2181
+       
+       
+       
+  elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
+        container_name: elasticsearch
+        environment:
+          - node.name=elasticsearch
+          - cluster.name=es-docker-cluster
+          - cluster.initial_master_nodes=elasticsearch
+          - xpack.security.enabled=false
+          - bootstrap.memory_lock=true
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+        ulimits:
+            memlock:
+                soft: -1
+                hard: -1
+        volumes:
+            - ./volumes/elasticsearch:/usr/share/elasticsearch/data
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10k"
+                max-file: "10"
+        ports:
+            - 9200:9200
+            - 9300:9300
+
+  kibana:
+        image: docker.elastic.co/kibana/kibana:8.12.2
+        container_name: kibana
+        environment:
+            - node.name=kibana
+            - cluster.name=es-docker-cluster
+            - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+        ports:
+            - 5601:5601
+        depends_on:
+            - elasticsearch 
+          
+  logstash:
+        container_name: logstash
+        image: logstash:8.12.2
+        ulimits:
+          memlock:
+            soft: -1
+            hard: -1
+        volumes:
+          - ./volumes/logstash-kafka.conf:/usr/share/logstash/pipeline/logstash-kafka.conf
+        ports:
+          - 5044:5044
+        depends_on:
+          - elasticsearch
+        restart: always
+        
